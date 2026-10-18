@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "a2a-test"
+version = "0.1.0"
+description = "Compliance test suite for A2A (Agent2Agent) protocol servers. One command, a full conformance report."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["a2a", "agent2agent", "agent", "testing", "compliance", "protocol", "llm", "ai"]
+authors = [{ name = "a2a-test contributors" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+    "Operating System :: OS Independent",
+]
+
+[project.scripts]
+a2a-test = "a2a_test.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Lts1sds/a2a-test"
+Documentation = "https://github.com/Lts1sds/a2a-test#readme"
+Issues = "https://github.com/Lts1sds/a2a-test/issues"
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "ruff>=0.6", "mypy>=1.10", "build>=1.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = ["examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
