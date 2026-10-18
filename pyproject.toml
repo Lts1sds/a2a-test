@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "a2a-test"
-version = "0.1.0"
+version = "0.2.0"
 description = "Compliance test suite for A2A (Agent2Agent) protocol servers. One command, a full conformance report."
 readme = "README.md"
 requires-python = ">=3.9"

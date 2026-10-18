@@ -48,11 +48,13 @@ La versión **v1.0.0** del protocolo A2A incluye cambios de ruptura: los método
 
 ## Características
 
-- **Tres suites, un comando** — estructura del Agent Card, comportamiento del protocolo JSON-RPC y semántica del ciclo de vida de las tareas, todo validado contra la especificación publicada.
+- **Cuatro suites, un comando** — estructura del Agent Card, comportamiento del protocolo JSON-RPC, semántica del ciclo de vida de las tareas y binding REST (HTTP+JSON), todo validado contra la especificación publicada.
 - **Detección de legado v0.3** — señala `preferredTransport`, `supportsExtendedAgentCard`, nombres de método con barras, discriminadores `kind` y otros comportamientos pre-1.0, con la nota de migración exacta para cada uno.
+- **Sondas del binding REST** — cuando el Agent Card declara una interface `HTTP+JSON`, se verifican `POST /message:send`, las rutas de tareas estilo Google AIP, los cuerpos de error `google.rpc.Status`, la paginación de `ListTasks` y el streaming SSE según la spec §11.
 - **Protocolo puro, cero dependencias** — implementa JSON-RPC 2.0 sobre HTTP y analiza SSE a mano usando solo la biblioteca estándar. No se usa el SDK oficial, porque un SDK normalizaría silenciosamente los errores que se están probando.
 - **Descubrimiento de endpoint fiel a la especificación** — el endpoint JSON-RPC se lee del `supportedInterfaces[].url` del Agent Card (spec §4.4.6), nunca se asume una ruta fija.
 - **Tres formatos de salida** — human / TAP 14 / JSON — con un código de salida (0/1) que actúa como compuerta de CI.
+- **GitHub Action** — utilizable directamente como `uses: Lts1sds/a2a-test@v0.2.0` en cualquier flujo de trabajo.
 
 ## Instalación
 
@@ -74,6 +76,7 @@ a2a-test all http://localhost:9999
 | `a2a-test card <url>` | Agent Card: descubrimiento, campos obligatorios, interfaces, skills, firmas, campos legados v0.3 |
 | `a2a-test probe <url>` | JSON-RPC: estilo de métodos, matriz de códigos de error, negociación de A2A-Version |
 | `a2a-test task <url>` | Ciclo de vida: SendMessage → sondeo → estado terminal → guardas → streaming SSE |
+| `a2a-test rest <url>` | Binding REST: `message:send`, rutas de tareas, errores `google.rpc.Status`, paginación, SSE |
 | `a2a-test all <url>` | Todo lo anterior |
 
 Opciones: `--format human|tap|json`, `--timeout <seg>`, `--task-timeout <seg>`, `--message <texto>`.
@@ -90,6 +93,16 @@ jobs:
     steps:
       - run: pip install a2a-test
       - run: a2a-test all https://staging.example.com --format tap
+```
+
+O usa directamente la GitHub Action empaquetada:
+
+```yaml
+      - uses: Lts1sds/a2a-test@v0.2.0
+        with:
+          url: https://staging.example.com
+          command: all
+          format: tap
 ```
 
 El código de salida es `1` si cualquier verificación FALLA (WARN no cuenta como fallo), y la salida TAP 14 se conecta a cualquier reportador de pruebas de CI estándar.
@@ -118,6 +131,14 @@ El código de salida es `1` si cualquier verificación FALLA (WARN no cuenta com
 - Las tareas en estado terminal rechazan `CancelTask` con `-32002` y mensajes adicionales con `-32004`
 - Streaming (cuando `capabilities.streaming`): enmarcado SSE, primer evento es el Task, el flujo se cierra en el estado terminal, sin discriminadores `kind`
 
+**`rest`** — *Binding HTTP+JSON, spec §11* (se ejecuta cuando el Agent Card declara una interface `HTTP+JSON`)
+
+- `POST /message:send` responde 200 con un objeto `task`/`message` y `Content-Type: application/a2a+json`
+- Ids de tarea desconocidos: `GET /tasks/{id}` y `POST /tasks/{id}:cancel` devuelven 404 con un cuerpo `google.rpc.Status` (`code: 5`, `details[].reason: TASK_NOT_FOUND`)
+- `GET /tasks` devuelve el sobre `ListTasksResponse` con `nextPageToken` / `pageSize` / `totalSize`
+- Una `A2A-Version` no soportada se rechaza con HTTP 400 (problem+json de la spec §6.4)
+- `POST /message:stream` (cuando `capabilities.streaming`) responde con SSE de eventos Task / statusUpdate sin envolver
+
 ## Principios de diseño
 
 1. **Sin SDK oficial.** Una herramienta de conformidad debe hablar el protocolo puro; un SDK ocultaría las respuestas no conformes.
@@ -126,17 +147,18 @@ El código de salida es `1` si cualquier verificación FALLA (WARN no cuenta com
 
 ## Hoja de ruta
 
-- [ ] Sondas del binding REST (`POST /message:send`, estilo Google AIP) y del binding gRPC
+- [x] Sondas del binding REST (`POST /message:send`, estilo Google AIP) — *v0.2.0*
+- [x] GitHub Action — *v0.2.0*
+- [ ] Sondas del binding gRPC
 - [ ] Verificación completa de firmas del Agent Card (JWS + canonización RFC 8785)
 - [ ] Casos de prueba YAML declarativos para escenarios específicos de cada agente
 - [ ] Plugin de pytest
-- [ ] GitHub Action con comentarios en PRs
 
 ## Desarrollo
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 19 pruebas
+pytest                                   # 24 pruebas
 ruff check src tests && ruff format --check src tests
 mypy src/a2a_test
 ```

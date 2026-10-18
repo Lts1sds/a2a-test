@@ -48,11 +48,13 @@ Die A2A-Spezifikation hat **v1.0.0** mit Breaking Changes veröffentlicht: JSON-
 
 ## Funktionen
 
-- **Drei Suiten, ein Befehl** — Agent-Card-Struktur, JSON-RPC-Protokollverhalten und Task-Lebenszyklus-Semantik, alles gegen die veröffentlichte Spezifikation geprüft.
-- **v0.3-Legacy-Erkennung** — markiert `preferredTransport`, `supportsExtendedAgentCard`, Methodennamen im Schrägstrich-Stil, `kind`-Diskriminatoren und weitere Pre-1.0-Verhaltensweisen, jeweils mit der exakten Migrationshinweis.
+- **Vier Suiten, ein Befehl** — Agent-Card-Struktur, JSON-RPC-Protokollverhalten, Task-Lebenszyklus-Semantik und REST-Binding (HTTP+JSON), alles gegen die veröffentlichte Spezifikation geprüft.
+- **v0.3-Legacy-Erkennung** — markiert `preferredTransport`, `supportsExtendedAgentCard`, Methodennamen im Schrägstrich-Stil, `kind`-Diskriminatoren und weitere Pre-1.0-Verhaltensweisen, jeweils mit dem exakten Migrationshinweis.
+- **REST-Binding-Sonden** — deklariert die Agent Card ein `HTTP+JSON`-Interface, werden `POST /message:send`, Task-Pfade im Google-AIP-Stil, `google.rpc.Status`-Fehlerkörper, `ListTasks`-Paginierung und SSE-Streaming gemäß Spec §11 geprüft.
 - **Rohprotokoll, null Abhängigkeiten** — implementiert JSON-RPC 2.0 über HTTP und parst SSE von Hand, ausschließlich mit der Standardbibliothek. Das offizielle SDK wird bewusst nicht verwendet, denn ein SDK würde nicht konforme Antworten stillschweigend normalisieren und die zu testenden Bugs verbergen.
 - **Spezifikationstreue Endpunkt-Entdeckung** — der JSON-RPC-Endpunkt wird aus `supportedInterfaces[].url` der Agent Card gelesen (Spec §4.4.6), niemals als fester Pfad angenommen.
 - **Drei Ausgabeformate** — human / TAP 14 / JSON — mit einem Exit-Code (0/1) als CI-Gate.
+- **GitHub Action** — direkt als `uses: Lts1sds/a2a-test@v0.2.0` in jedem Workflow nutzbar.
 
 ## Installation
 
@@ -74,6 +76,7 @@ a2a-test all http://localhost:9999
 | `a2a-test card <url>` | Agent Card: Discovery, Pflichtfelder, Interfaces, Skills, Signaturen, v0.3-Legacy-Felder |
 | `a2a-test probe <url>` | JSON-RPC: Methodenstil, Fehlercode-Matrix, A2A-Version-Aushandlung |
 | `a2a-test task <url>` | Lebenszyklus: SendMessage → Polling → Endzustand → Guards → SSE-Streaming |
+| `a2a-test rest <url>` | REST-Binding: `message:send`, Task-Pfade, `google.rpc.Status`-Fehler, Paginierung, SSE |
 | `a2a-test all <url>` | Alles zusammen |
 
 Optionen: `--format human|tap|json`, `--timeout <Sek>`, `--task-timeout <Sek>`, `--message <Text>`.
@@ -90,6 +93,16 @@ jobs:
     steps:
       - run: pip install a2a-test
       - run: a2a-test all https://staging.example.com --format tap
+```
+
+Oder direkt die gepackte GitHub Action verwenden:
+
+```yaml
+      - uses: Lts1sds/a2a-test@v0.2.0
+        with:
+          url: https://staging.example.com
+          command: all
+          format: tap
 ```
 
 Der Exit-Code ist `1`, sobald ein Check FAILt (WARN gilt nicht als Fehler), und die TAP-14-Ausgabe passt in jeden Standard-CI-Test-Reporter.
@@ -118,6 +131,14 @@ Der Exit-Code ist `1`, sobald ein Check FAILt (WARN gilt nicht als Fehler), und 
 - Tasks im Endzustand lehnen `CancelTask` mit `-32002` und weitere Nachrichten mit `-32004` ab
 - Streaming (wenn `capabilities.streaming`): SSE-Framing, erstes Ereignis ist der Task, der Stream schließt im Endzustand, keine `kind`-Diskriminatoren
 
+**`rest`** — *HTTP+JSON-Binding, Spec §11* (läuft, wenn die Agent Card ein `HTTP+JSON`-Interface deklariert)
+
+- `POST /message:send` antwortet mit 200, einem `task`/`message`-Objekt und `Content-Type: application/a2a+json`
+- Unbekannte Task-IDs: `GET /tasks/{id}` und `POST /tasks/{id}:cancel` liefern 404 mit einem `google.rpc.Status`-Körper (`code: 5`, `details[].reason: TASK_NOT_FOUND`)
+- `GET /tasks` liefert das `ListTasksResponse`-Envelope mit `nextPageToken` / `pageSize` / `totalSize`
+- Eine nicht unterstützte `A2A-Version` wird mit HTTP 400 abgelehnt (problem+json gemäß Spec §6.4)
+- `POST /message:stream` (wenn `capabilities.streaming`) antwortet mit SSE aus nicht verpackten Task-/statusUpdate-Ereignissen
+
 ## Designprinzipien
 
 1. **Kein offizielles SDK.** Ein Konformitäts-Tool muss das Rohprotokoll sprechen; ein SDK würde nicht konforme Antworten verbergen.
@@ -126,17 +147,18 @@ Der Exit-Code ist `1`, sobald ein Check FAILt (WARN gilt nicht als Fehler), und 
 
 ## Roadmap
 
-- [ ] REST-Binding-Sonden (`POST /message:send`, Google-AIP-Stil) und gRPC-Binding-Sonden
+- [x] REST-Binding-Sonden (`POST /message:send`, Google-AIP-Stil) — *v0.2.0*
+- [x] GitHub Action — *v0.2.0*
+- [ ] gRPC-Binding-Sonden
 - [ ] Vollständige Signaturprüfung der Agent Card (JWS + RFC-8785-Kanonisierung)
 - [ ] Deklarative YAML-Testfälle für agentenspezifische Szenarien
 - [ ] pytest-Plugin
-- [ ] GitHub Action mit PR-Kommentaren
 
 ## Entwicklung
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 19 Tests
+pytest                                   # 24 Tests
 ruff check src tests && ruff format --check src tests
 mypy src/a2a_test
 ```

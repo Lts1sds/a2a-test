@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from . import __version__
@@ -11,6 +12,7 @@ from .checks import CheckSuite
 from .client import DEFAULT_TIMEOUT, A2AClient
 from .probe import probe_protocol
 from .report import render
+from .rest import discover_rest_interface, probe_rest
 from .task import smoke_task
 
 EPILOG = """\
@@ -18,6 +20,7 @@ examples:
   a2a-test all http://localhost:9999
   a2a-test card https://agent.example.com
   a2a-test probe http://localhost:9999 --format tap
+  a2a-test rest http://localhost:9999
   a2a-test all https://agent.example.com --format json > report.json
 
 exit code is 1 when any check FAILs (WARN does not fail), so it can gate CI.
@@ -66,11 +69,24 @@ def build_parser() -> argparse.ArgumentParser:
         ("card", "fetch and validate the Agent Card (structure + v0.3 legacy fields)"),
         ("probe", "JSON-RPC conformance: error codes, method style, version negotiation"),
         ("task", "task lifecycle smoke test (send, poll, terminal, guards, streaming)"),
-        ("all", "run every suite: card + probe + task"),
+        ("rest", "REST (HTTP+JSON) binding conformance: paths, error format, pagination"),
+        ("all", "run every suite: card + probe + task + rest"),
     ]:
         p = sub.add_parser(name, help=help_text)
         add_target(p)
     return parser
+
+
+def _fetch_card(client: A2AClient) -> dict | None:
+    """Fetch and parse the Agent Card without running card checks."""
+    try:
+        _status, _ctype, body = client.fetch_card()
+        card = json.loads(body)
+        if isinstance(card, dict):
+            return card
+    except (ValueError, OSError):
+        pass
+    return None
 
 
 def run_suites(args: argparse.Namespace, client: A2AClient) -> CheckSuite:
@@ -92,6 +108,22 @@ def run_suites(args: argparse.Namespace, client: A2AClient) -> CheckSuite:
             capabilities=caps,
             task_timeout=getattr(args, "task_timeout", 60.0),
         )
+    if command in ("rest", "all"):
+        if card is None:
+            card = _fetch_card(client)
+        rest_base = discover_rest_interface(card)
+        if rest_base:
+            caps = {}
+            if isinstance(card, dict) and isinstance(card.get("capabilities"), dict):
+                caps = card["capabilities"]
+            probe_rest(suite, client, rest_base, capabilities=caps)
+        else:
+            suite.skip(
+                "rest",
+                "interface",
+                "no HTTP+JSON interface declared in the Agent Card "
+                "(supportedInterfaces[].protocolBinding == 'HTTP+JSON')",
+            )
     return suite
 
 

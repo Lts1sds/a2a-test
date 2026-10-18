@@ -198,35 +198,32 @@ class A2AClient:
     # ------------------------------------------------------------------
     # SSE streaming
     # ------------------------------------------------------------------
-    def rpc_stream(
+    def post_stream(
         self,
-        method: str,
-        params: dict[str, Any] | None = None,
-        a2a_version: str = "1.0",
-        request_id: Any = 1,
+        url: str,
+        payload: Any,
+        headers: dict[str, str] | None = None,
     ) -> tuple[int, str, Iterator[str]]:
-        """Send a request expected to answer with an SSE stream.
+        """POST a JSON payload and read the answer as an SSE stream.
 
         Returns (http_status, content_type, iterator_of_data_payloads).
         The iterator yields the decoded ``data:`` payload of each SSE frame.
         """
         import socket
 
-        payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
-        if params is not None:
-            payload["params"] = params
         data = json.dumps(payload).encode("utf-8")
-        headers = {
+        h = {
             "Content-Type": JSONRPC_CONTENT_TYPE,
             "Accept": SSE_CONTENT_TYPE + ", application/json",
-            "A2A-Version": a2a_version,
         }
-        req = urllib.request.Request(self.endpoint_url(), data=data, headers=headers, method="POST")
+        if headers:
+            h.update(headers)
+        req = urllib.request.Request(url, data=data, headers=h, method="POST")
         try:
             resp = urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl_context)
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
-            return int(e.code), e.headers.get("Content-Type", ""), iter(())
+            return int(e.code), e.headers.get("Content-Type", ""), iter([body] if body else [])
 
         status = int(resp.status)
         ctype = resp.headers.get("Content-Type", "")
@@ -254,6 +251,23 @@ class A2AClient:
                 resp.close()
 
         return status, ctype, frames()
+
+    def rpc_stream(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        a2a_version: str = "1.0",
+        request_id: Any = 1,
+    ) -> tuple[int, str, Iterator[str]]:
+        """Send a JSON-RPC request expected to answer with an SSE stream.
+
+        Returns (http_status, content_type, iterator_of_data_payloads).
+        The iterator yields the decoded ``data:`` payload of each SSE frame.
+        """
+        payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
+        if params is not None:
+            payload["params"] = params
+        return self.post_stream(self.endpoint_url(), payload, headers={"A2A-Version": a2a_version})
 
 
 def error_code(response: dict[str, Any] | None) -> int | None:

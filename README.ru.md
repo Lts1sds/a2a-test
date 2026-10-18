@@ -48,11 +48,13 @@ $ a2a-test all http://localhost:9999
 
 ## Возможности
 
-- **Три набора, одна команда** — структура Agent Card, поведение протокола JSON-RPC и семантика жизненного цикла задач — всё проверяется по опубликованной спецификации.
+- **Четыре набора, одна команда** — структура Agent Card, поведение протокола JSON-RPC, семантика жизненного цикла задач и REST-биндинг (HTTP+JSON) — всё проверяется по опубликованной спецификации.
 - **Обнаружение legacy v0.3** — помечает `preferredTransport`, `supportsExtendedAgentCard`, имена методов через слэш, дискриминаторы `kind` и другие поведения pre-1.0 с точной пометкой о миграции для каждого.
+- **Зонды REST-биндинга** — когда Agent Card объявляет интерфейс `HTTP+JSON`, проверяются `POST /message:send`, пути задач в стиле Google AIP, тела ошибок `google.rpc.Status`, пагинация `ListTasks` и SSE-стриминг по спец. §11.
 - **Чистый протокол, ноль зависимостей** — реализует JSON-RPC 2.0 поверх HTTP и разбирает SSE вручную, используя только стандартную библиотеку. Официальный SDK намеренно не используется: SDK молча нормализует несоответствующие ответы и скрывает проверяемые ошибки.
 - **Обнаружение endpoint по спецификации** — JSON-RPC endpoint читается из `supportedInterfaces[].url` Agent Card (спец. §4.4.6), а не предполагается фиксированным путём.
 - **Три формата вывода** — human / TAP 14 / JSON — с кодом выхода (0/1), работающим как CI-гейт.
+- **GitHub Action** — используется напрямую как `uses: Lts1sds/a2a-test@v0.2.0` в любом workflow.
 
 ## Установка
 
@@ -74,6 +76,7 @@ a2a-test all http://localhost:9999
 | `a2a-test card <url>` | Agent Card: обнаружение, обязательные поля, интерфейсы, skills, подписи, legacy-поля v0.3 |
 | `a2a-test probe <url>` | JSON-RPC: стиль методов, матрица кодов ошибок, согласование A2A-Version |
 | `a2a-test task <url>` | Жизненный цикл: SendMessage → опрос → терминальное состояние → защиты → SSE-стриминг |
+| `a2a-test rest <url>` | REST-биндинг: `message:send`, пути задач, ошибки `google.rpc.Status`, пагинация, SSE |
 | `a2a-test all <url>` | Всё перечисленное |
 
 Опции: `--format human|tap|json`, `--timeout <сек>`, `--task-timeout <сек>`, `--message <текст>`.
@@ -90,6 +93,16 @@ jobs:
     steps:
       - run: pip install a2a-test
       - run: a2a-test all https://staging.example.com --format tap
+```
+
+Или используйте готовую GitHub Action напрямую:
+
+```yaml
+      - uses: Lts1sds/a2a-test@v0.2.0
+        with:
+          url: https://staging.example.com
+          command: all
+          format: tap
 ```
 
 Код выхода равен `1`, если хоть одна проверка провалена (WARN не считается провалом), а вывод TAP 14 подключается к любому стандартному CI-репортеру.
@@ -118,6 +131,14 @@ jobs:
 - Задачи в терминальном состоянии отклоняют `CancelTask` с `-32002` и дальнейшие сообщения с `-32004`
 - Стриминг (при `capabilities.streaming`): SSE-фрейминг, первое событие — Task, поток закрывается на терминальном состоянии, без дискриминаторов `kind`
 
+**`rest`** — *HTTP+JSON-биндинг, спец. §11* (выполняется, когда Agent Card объявляет интерфейс `HTTP+JSON`)
+
+- `POST /message:send` отвечает 200 с объектом `task`/`message` и `Content-Type: application/a2a+json`
+- Неизвестные id задач: `GET /tasks/{id}` и `POST /tasks/{id}:cancel` возвращают 404 с телом `google.rpc.Status` (`code: 5`, `details[].reason: TASK_NOT_FOUND`)
+- `GET /tasks` возвращает конверт `ListTasksResponse` с `nextPageToken` / `pageSize` / `totalSize`
+- Неподдерживаемая `A2A-Version` отклоняется с HTTP 400 (problem+json по спец. §6.4)
+- `POST /message:stream` (при `capabilities.streaming`) отвечает SSE из событий Task / statusUpdate без обёртки
+
 ## Принципы проектирования
 
 1. **Без официального SDK.** Инструмент проверки соответствия должен говорить по чистому протоколу; SDK маскирует несоответствующие ответы.
@@ -126,17 +147,18 @@ jobs:
 
 ## Планы
 
-- [ ] Зонды REST-биндинга (`POST /message:send`, стиль Google AIP) и gRPC-биндинга
+- [x] Зонды REST-биндинга (`POST /message:send`, стиль Google AIP) — *v0.2.0*
+- [x] GitHub Action — *v0.2.0*
+- [ ] Зонды gRPC-биндинга
 - [ ] Полная проверка подписей Agent Card (JWS + канонизация RFC 8785)
 - [ ] Декларативные YAML-тесты для сценариев конкретных агентов
 - [ ] Плагин pytest
-- [ ] GitHub Action с комментариями в PR
 
 ## Разработка
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 19 тестов
+pytest                                   # 24 тестов
 ruff check src tests && ruff format --check src tests
 mypy src/a2a_test
 ```

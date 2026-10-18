@@ -48,11 +48,13 @@ The A2A protocol shipped **v1.0.0** with breaking changes: JSON-RPC methods were
 
 ## Features
 
-- **Three suites, one command** — Agent Card structure, JSON-RPC protocol behavior, and task-lifecycle semantics, all validated against the published specification.
+- **Four suites, one command** — Agent Card structure, JSON-RPC protocol behavior, task-lifecycle semantics, and the REST (HTTP+JSON) binding, all validated against the published specification.
 - **v0.3 legacy detection** — flags `preferredTransport`, `supportsExtendedAgentCard`, slash-style method names, `kind` discriminators, and other pre-1.0 behaviors with the exact migration note for each.
+- **REST binding probes** — when the Agent Card declares an `HTTP+JSON` interface, `POST /message:send`, Google AIP-style task paths, `google.rpc.Status` error bodies, `ListTasks` pagination, and SSE streaming are verified against spec §11.
 - **Raw protocol, zero dependencies** — speaks plain JSON-RPC 2.0 over HTTP and parses SSE by hand using only the standard library. No official SDK is involved, because an SDK would silently normalize away the very bugs being tested for.
 - **Spec-accurate endpoint discovery** — the JSON-RPC endpoint is read from the Agent Card's `supportedInterfaces[].url` (per spec §4.4.6), never assumed to be a fixed path.
 - **Three output formats** — human-readable, TAP 14, and JSON — with an exit code (0/1) that gates CI.
+- **GitHub Action** — usable directly as `uses: Lts1sds/a2a-test@v0.2.0` in any workflow.
 
 ## Installation
 
@@ -74,6 +76,7 @@ a2a-test all http://localhost:9999
 | `a2a-test card <url>` | Agent Card: discovery, required fields, interfaces, skills, signatures, v0.3 legacy fields |
 | `a2a-test probe <url>` | JSON-RPC: method style, error-code matrix, A2A-Version negotiation |
 | `a2a-test task <url>` | Lifecycle: SendMessage → poll → terminal state → guards → SSE streaming |
+| `a2a-test rest <url>` | REST binding: `message:send`, task paths, `google.rpc.Status` errors, pagination, SSE |
 | `a2a-test all <url>` | Everything above |
 
 Options: `--format human|tap|json`, `--timeout <sec>`, `--task-timeout <sec>`, `--message <text>`.
@@ -90,6 +93,16 @@ jobs:
     steps:
       - run: pip install a2a-test
       - run: a2a-test all https://staging.example.com --format tap
+```
+
+Or use the packaged GitHub Action:
+
+```yaml
+      - uses: Lts1sds/a2a-test@v0.2.0
+        with:
+          url: https://staging.example.com
+          command: all
+          format: tap
 ```
 
 The exit code is `1` when any check FAILs (WARN does not fail), and TAP 14 output plugs into any standard CI test reporter.
@@ -118,6 +131,14 @@ The exit code is `1` when any check FAILs (WARN does not fail), and TAP 14 outpu
 - Terminal tasks reject `CancelTask` with `-32002` and further messages with `-32004`
 - Streaming (when `capabilities.streaming`): SSE framing, first event is the Task, stream closes on terminal state, no `kind` discriminators
 
+**`rest`** — *HTTP+JSON binding, spec §11* (runs when the Agent Card declares an `HTTP+JSON` interface)
+
+- `POST /message:send` answers 200 with a `task`/`message` object and `Content-Type: application/a2a+json`
+- Unknown task ids: `GET /tasks/{id}` and `POST /tasks/{id}:cancel` return 404 with a `google.rpc.Status` body (`code: 5`, `details[].reason: TASK_NOT_FOUND`)
+- `GET /tasks` returns the `ListTasksResponse` envelope with `nextPageToken` / `pageSize` / `totalSize`
+- Unsupported `A2A-Version` is rejected with HTTP 400 (spec §6.4 problem+json)
+- `POST /message:stream` (when `capabilities.streaming`) answers SSE with unwrapped Task / statusUpdate events
+
 ## Design principles
 
 1. **No official SDK.** A conformance tool must speak the raw wire protocol; an SDK would paper over non-conformant responses.
@@ -126,17 +147,18 @@ The exit code is `1` when any check FAILs (WARN does not fail), and TAP 14 outpu
 
 ## Roadmap
 
-- [ ] REST binding probes (`POST /message:send`, Google AIP style) and gRPC binding probes
+- [x] REST binding probes (`POST /message:send`, Google AIP style) — *v0.2.0*
+- [x] GitHub Action — *v0.2.0*
+- [ ] gRPC binding probes
 - [ ] Full Agent Card signature verification (JWS + RFC 8785 canonicalization)
 - [ ] Declarative YAML test cases for agent-specific scenarios
 - [ ] pytest plugin
-- [ ] GitHub Action with PR comments
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 19 tests
+pytest                                   # 24 tests
 ruff check src tests && ruff format --check src tests
 mypy src/a2a_test
 ```

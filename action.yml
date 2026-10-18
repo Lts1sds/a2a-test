@@ -1,0 +1,53 @@
+name: "A2A Compliance Test"
+description: "Run a2a-test compliance checks against an A2A (Agent2Agent) protocol server in CI. Exit code 1 fails the job when any check fails."
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  url:
+    description: "Base URL of the A2A server under test, e.g. http://localhost:9999"
+    required: true
+  command:
+    description: "a2a-test command: card, probe, task, rest, or all"
+    default: "all"
+  format:
+    description: "Output format: human, tap, or json"
+    default: "tap"
+  timeout:
+    description: "Per-request timeout in seconds"
+    default: "30"
+  message:
+    description: "Text sent in the task smoke test"
+    default: "Reply with the single word: pong"
+  task-timeout:
+    description: "Seconds to wait for a task to reach a terminal state"
+    default: "60"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install a2a-test
+      shell: bash
+      run: pip install "${GITHUB_ACTION_PATH}"
+
+    - name: Run a2a-test
+      shell: bash
+      env:
+        A2A_URL: ${{ inputs.url }}
+        A2A_COMMAND: ${{ inputs.command }}
+        A2A_FORMAT: ${{ inputs.format }}
+        A2A_TIMEOUT: ${{ inputs.timeout }}
+        A2A_MESSAGE: ${{ inputs.message }}
+        A2A_TASK_TIMEOUT: ${{ inputs.task-timeout }}
+      run: |
+        a2a-test "$A2A_COMMAND" "$A2A_URL" \
+          --format "$A2A_FORMAT" \
+          --timeout "$A2A_TIMEOUT" \
+          --message "$A2A_MESSAGE" \
+          --task-timeout "$A2A_TASK_TIMEOUT"

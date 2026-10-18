@@ -48,11 +48,13 @@ A2A 프로토콜의 **v1.0.0**에는 파괴적 변경이 포함되어 있습니�
 
 ## 특징
 
-- **세 가지 스위트, 한 번의 명령** — Agent Card 구조, JSON-RPC 프로토콜 동작, 태스크 라이프사이클 시맨틱을 게시된 사양에 따라 검증합니다.
+- **네 가지 스위트, 한 번의 명령** — Agent Card 구조, JSON-RPC 프로토콜 동작, 태스크 라이프사이클 시맨틱, REST(HTTP+JSON) 바인딩을 게시된 사양에 따라 검증합니다.
 - **v0.3 레거시 감지** — `preferredTransport`, `supportsExtendedAgentCard`, 슬래시 스타일 메서드 이름, `kind` 판별자 등 pre-1.0 동작을 감지하고 각 항목의 정확한 마이그레이션 노트를 제공합니다.
+- **REST 바인딩 프로브** — Agent Card가 `HTTP+JSON` 인터페이스를 선언하면 `POST /message:send`, Google AIP 스타일 태스크 경로, `google.rpc.Status` 오류 본문, `ListTasks` 페이지네이션, SSE 스트리밍을 사양 §11에 따라 검증합니다.
 - **원시 프로토콜, 의존성 없음** — 표준 라이브러리만으로 JSON-RPC 2.0 over HTTP를 구현하고 SSE를 직접 파싱합니다. 공식 SDK는 의도적으로 사용하지 않습니다. SDK가 비준수 응답을 조용히 정규화하여 테스트 대상 버그를 가릴 수 있기 때문입니다.
 - **사양에 정확한 엔드포인트 발견** — JSON-RPC 엔드포인트는 Agent Card의 `supportedInterfaces[].url`에서 읽습니다(사양 §4.4.6). 고정 경로를 가정하지 않습니다.
 - **세 가지 출력 형식** — human / TAP 14 / JSON, 종료 코드(0/1)는 그대로 CI 게이트가 됩니다.
+- **GitHub Action** — 어떤 워크플로에서든 `uses: Lts1sds/a2a-test@v0.2.0`으로 직접 사용할 수 있습니다.
 
 ## 설치
 
@@ -74,6 +76,7 @@ a2a-test all http://localhost:9999
 | `a2a-test card <url>` | Agent Card: 발견, 필수 필드, interfaces, skills, 서명, v0.3 레거시 필드 |
 | `a2a-test probe <url>` | JSON-RPC: 메서드 스타일, 오류 코드 매트릭스, A2A-Version 협상 |
 | `a2a-test task <url>` | 라이프사이클: SendMessage → 폴링 → 종료 상태 → 가드 → SSE 스트리밍 |
+| `a2a-test rest <url>` | REST 바인딩: `message:send`, 태스크 경로, `google.rpc.Status` 오류, 페이지네이션, SSE |
 | `a2a-test all <url>` | 위의 모든 것 |
 
 옵션: `--format human|tap|json`, `--timeout <초>`, `--task-timeout <초>`, `--message <텍스트>`.
@@ -90,6 +93,16 @@ jobs:
     steps:
       - run: pip install a2a-test
       - run: a2a-test all https://staging.example.com --format tap
+```
+
+또는 패키지된 GitHub Action을 직접 사용:
+
+```yaml
+      - uses: Lts1sds/a2a-test@v0.2.0
+        with:
+          url: https://staging.example.com
+          command: all
+          format: tap
 ```
 
 어떤 검사든 FAIL이면 종료 코드는 `1`입니다(WARN은 실패로 간주하지 않음). TAP 14 출력은 표준 CI 테스트 리포터에 연결할 수 있습니다.
@@ -118,6 +131,14 @@ jobs:
 - 종료 상태 태스크는 `CancelTask`(`-32002`)와 추가 메시지(`-32004`)를 거부
 - 스트리밍(`capabilities.streaming`이 참일 때): SSE 프레이밍, 첫 이벤트는 Task, 종료 상태에서 스트림 종료, `kind` 판별자 없음
 
+**`rest`** — *HTTP+JSON 바인딩, 사양 §11* (Agent Card가 `HTTP+JSON` 인터페이스를 선언할 때 실행)
+
+- `POST /message:send`가 200과 `task`/`message` 객체를 포함한 본문, `Content-Type: application/a2a+json`으로 응답
+- 알 수 없는 태스크 id: `GET /tasks/{id}`와 `POST /tasks/{id}:cancel`이 404 + `google.rpc.Status` 오류 본문(`code: 5`, `details[].reason: TASK_NOT_FOUND`) 반환
+- `GET /tasks`가 `nextPageToken` / `pageSize` / `totalSize`를 포함한 `ListTasksResponse` 엔벨로프 반환
+- 지원되지 않는 `A2A-Version`은 HTTP 400으로 거부(사양 §6.4 problem+json)
+- `POST /message:stream`(`capabilities.streaming`이 참일 때)가 래핑되지 않은 Task / statusUpdate 이벤트의 SSE로 응답
+
 ## 설계 원칙
 
 1. **공식 SDK 미사용.** 컨포먼스 도구는 원시 와이어 프로토콜을 사용해야 합니다. SDK는 비준수 응답을 가립니다.
@@ -126,17 +147,18 @@ jobs:
 
 ## 로드맵
 
-- [ ] REST 바인딩 프로브(`POST /message:send`, Google AIP 스타일) 및 gRPC 바인딩 프로브
+- [x] REST 바인딩 프로브(`POST /message:send`, Google AIP 스타일) — *v0.2.0*
+- [x] GitHub Action — *v0.2.0*
+- [ ] gRPC 바인딩 프로브
 - [ ] Agent Card 서명 완전 검증(JWS + RFC 8785 정규화)
 - [ ] 에이전트별 시나리오를 위한 선언적 YAML 테스트 케이스
 - [ ] pytest 플러그인
-- [ ] PR 코멘트가 있는 GitHub Action
 
 ## 개발
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 19 테스트
+pytest                                   # 24 테스트
 ruff check src tests && ruff format --check src tests
 mypy src/a2a_test
 ```

@@ -48,11 +48,13 @@ A2A 协议发布的 **v1.0.0** 包含多项破坏性变更：JSON-RPC 方法名�
 
 ## 特性
 
-- **三套测试组，一条命令**——Agent Card 结构、JSON-RPC 协议行为、任务生命周期语义，全部对照已发布规范校验。
+- **四套测试组，一条命令**——Agent Card 结构、JSON-RPC 协议行为、任务生命周期语义、REST（HTTP+JSON）绑定，全部对照已发布规范校验。
 - **v0.3 遗留检测**——标记 `preferredTransport`、`supportsExtendedAgentCard`、斜杠风格方法名、`kind` 判别器等 pre-1.0 行为，并附每项的精确迁移说明。
+- **REST 绑定探针**——当 Agent Card 声明 `HTTP+JSON` 接口时，校验 `POST /message:send`、Google AIP 风格任务路径、`google.rpc.Status` 错误体、`ListTasks` 分页与 SSE 流式（规范 §11）。
 - **裸协议、零依赖**——仅用标准库手写 JSON-RPC 2.0 over HTTP 并手工解析 SSE。刻意不使用官方 SDK——SDK 会悄悄修正不合规响应，掩盖被测的 bug。
 - **遵循规范的端点发现**——JSON-RPC 端点从 Agent Card 的 `supportedInterfaces[].url` 读取（规范 §4.4.6），绝不假设为固定路径。
 - **三种输出格式**——human / TAP 14 / JSON，退出码（0/1）可直接作为 CI 门禁。
+- **GitHub Action**——任何工作流中可直接 `uses: Lts1sds/a2a-test@v0.2.0`。
 
 ## 安装
 
@@ -74,6 +76,7 @@ a2a-test all http://localhost:9999
 | `a2a-test card <url>` | Agent Card：发现、必填字段、interfaces、skills、签名、v0.3 遗留字段 |
 | `a2a-test probe <url>` | JSON-RPC：方法风格、错误码矩阵、A2A-Version 协商 |
 | `a2a-test task <url>` | 生命周期：SendMessage → 轮询 → 终态 → 守卫 → SSE 流式 |
+| `a2a-test rest <url>` | REST 绑定：`message:send`、任务路径、`google.rpc.Status` 错误、分页、SSE |
 | `a2a-test all <url>` | 以上全部 |
 
 选项：`--format human|tap|json`、`--timeout <秒>`、`--task-timeout <秒>`、`--message <文本>`。
@@ -90,6 +93,16 @@ jobs:
     steps:
       - run: pip install a2a-test
       - run: a2a-test all https://staging.example.com --format tap
+```
+
+或直接使用打包好的 GitHub Action：
+
+```yaml
+      - uses: Lts1sds/a2a-test@v0.2.0
+        with:
+          url: https://staging.example.com
+          command: all
+          format: tap
 ```
 
 任一检查 FAIL 时退出码为 `1`（WARN 不算失败），TAP 14 输出可接入任何标准 CI 测试报告器。
@@ -118,6 +131,14 @@ jobs:
 - 终态任务拒绝 `CancelTask`（`-32002`）与后续消息（`-32004`）
 - 流式（当 `capabilities.streaming` 为真）：SSE 帧格式、首事件为 Task、终态关闭流、无 `kind` 判别器
 
+**`rest`** — *HTTP+JSON 绑定，规范 §11*（当 Agent Card 声明 `HTTP+JSON` 接口时运行）
+
+- `POST /message:send` 返回 200，body 含 `task`/`message` 对象，`Content-Type: application/a2a+json`
+- 未知任务 id：`GET /tasks/{id}` 与 `POST /tasks/{id}:cancel` 返回 404 + `google.rpc.Status` 错误体（`code: 5`、`details[].reason: TASK_NOT_FOUND`）
+- `GET /tasks` 返回 `ListTasksResponse` 信封，含 `nextPageToken` / `pageSize` / `totalSize`
+- 不支持的 `A2A-Version` 被 HTTP 400 拒绝（规范 §6.4 problem+json）
+- `POST /message:stream`（当 `capabilities.streaming` 为真）以 SSE 应答，事件为未包装的 Task / statusUpdate
+
 ## 设计原则
 
 1. **不使用官方 SDK。** 合规工具必须说裸协议；SDK 会掩盖不合规响应。
@@ -126,17 +147,18 @@ jobs:
 
 ## 路线图
 
-- [ ] REST 绑定探针（`POST /message:send`，Google AIP 风格）与 gRPC 绑定探针
+- [x] REST 绑定探针（`POST /message:send`，Google AIP 风格）——*v0.2.0*
+- [x] GitHub Action——*v0.2.0*
+- [ ] gRPC 绑定探针
 - [ ] Agent Card 签名完整验证（JWS + RFC 8785 规范化）
 - [ ] 面向 Agent 特定场景的声明式 YAML 测试用例
 - [ ] pytest 插件
-- [ ] 带 PR 评论的 GitHub Action
 
 ## 开发
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 19 项测试
+pytest                                   # 24 项测试
 ruff check src tests && ruff format --check src tests
 mypy src/a2a_test
 ```
